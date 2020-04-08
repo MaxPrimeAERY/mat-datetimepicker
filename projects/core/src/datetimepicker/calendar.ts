@@ -1,14 +1,4 @@
-import {
-  DOWN_ARROW,
-  END,
-  ENTER,
-  HOME,
-  LEFT_ARROW,
-  PAGE_DOWN,
-  PAGE_UP,
-  RIGHT_ARROW,
-  UP_ARROW
-} from "@angular/cdk/keycodes";
+import {DOWN_ARROW, END, ENTER, HOME, LEFT_ARROW, PAGE_DOWN, PAGE_UP, RIGHT_ARROW, UP_ARROW} from "@angular/cdk/keycodes";
 import {
   AfterContentInit,
   ChangeDetectionStrategy,
@@ -24,19 +14,16 @@ import {
   Output,
   ViewEncapsulation
 } from "@angular/core";
-import { MatDatepickerIntl } from "@angular/material/datepicker";
-import { Subscription } from "rxjs";
-import { first } from "rxjs/operators";
-import { DatetimeAdapter } from "../adapter/datetime-adapter";
-import {
-  MAT_DATETIME_FORMATS,
-  MatDatetimeFormats
-} from "../adapter/datetime-formats";
-import { MatClockView } from "./clock";
-import { MatDatetimepickerType } from "./datetimepicker";
-import { slideCalendar } from "./datetimepicker-animations";
-import { createMissingDateImplError } from "./datetimepicker-errors";
-import { MatDatetimepickerFilterType } from "./datetimepicker-filtertype";
+import {MatDatepickerIntl} from "@angular/material/datepicker";
+import {Subscription} from "rxjs";
+import {first} from "rxjs/operators";
+import {DatetimeAdapter} from "../adapter/datetime-adapter";
+import {MAT_DATETIME_FORMATS, MatDatetimeFormats} from "../adapter/datetime-formats";
+import {MatClockView} from "./clock";
+import {MatDatetimepickerType} from "./datetimepicker";
+import {slideCalendar} from "./datetimepicker-animations";
+import {createMissingDateImplError} from "./datetimepicker-errors";
+import {MatDatetimepickerFilterType} from "./datetimepicker-filtertype";
 
 export type MatCalendarView = "clock" | "month" | "year";
 
@@ -61,11 +48,47 @@ export type MatCalendarView = "clock" | "month" | "year";
 })
 export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy {
 
-  private _intlChanges: Subscription;
-
   @Output() _userSelection = new EventEmitter<void>();
-
   @Input() type: MatDatetimepickerType = "date";
+  /** Whether the calendar should be started in month or year view. */
+  @Input() startView: MatCalendarView = "month";
+  @Input() twelvehour: boolean = false;
+  @Input() timeInterval: number = 1;
+  /** A function used to filter which dates are selectable. */
+  @Input() dateFilter: (date: D, type: MatDatetimepickerFilterType) => boolean;
+  @Input() ariaLabel = "Use arrow keys to navigate";
+  @Input() ariaNextMonthLabel = "Next month";
+  @Input() ariaPrevMonthLabel = "Previous month";
+  @Input() ariaNextYearLabel = "Next year";
+  @Input() ariaPrevYearLabel = "Previous year";
+  /** Emits when the currently selected date changes. */
+  @Output() selectedChange: EventEmitter<D> = new EventEmitter<D>();
+  /** Emits when the view has been changed. **/
+  @Output() viewChanged: EventEmitter<MatCalendarView> = new EventEmitter<MatCalendarView>();
+  _AMPM: string;
+  _clockView: MatClockView = "hour";
+  _calendarState: string;
+  private _intlChanges: Subscription;
+  private _clampedActiveDate: D;
+
+  constructor(private _elementRef: ElementRef,
+              private _intl: MatDatepickerIntl,
+              private _ngZone: NgZone,
+              @Optional() private _adapter: DatetimeAdapter<D>,
+              @Optional() @Inject(MAT_DATETIME_FORMATS) private _dateFormats: MatDatetimeFormats,
+              changeDetectorRef: ChangeDetectorRef) {
+    if (!this._adapter) {
+      throw createMissingDateImplError("DatetimeAdapter");
+    }
+
+    if (!this._dateFormats) {
+      throw createMissingDateImplError("MAT_DATETIME_FORMATS");
+    }
+
+    this._intlChanges = _intl.changes.subscribe(() => changeDetectorRef.markForCheck());
+  }
+
+  private _startAt: D | null;
 
   /** A date representing the period (month or year) to start the calendar in. */
   @Input()
@@ -77,10 +100,7 @@ export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy
     this._startAt = this._adapter.getValidDateOrNull(value);
   }
 
-  private _startAt: D | null;
-
-  /** Whether the calendar should be started in month or year view. */
-  @Input() startView: MatCalendarView = "month";
+  private _selected: D | null;
 
   /** The currently selected date. */
   @Input()
@@ -92,7 +112,7 @@ export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy
     this._selected = this._adapter.getValidDateOrNull(value);
   }
 
-  private _selected: D | null;
+  private _minDate: D | null;
 
   /** The minimum selectable date. */
   @Input()
@@ -104,7 +124,7 @@ export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy
     this._minDate = this._adapter.getValidDateOrNull(value);
   }
 
-  private _minDate: D | null;
+  private _maxDate: D | null;
 
   /** The maximum selectable date. */
   @Input()
@@ -114,35 +134,6 @@ export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy
 
   set maxDate(value: D | null) {
     this._maxDate = this._adapter.getValidDateOrNull(value);
-  }
-
-  private _maxDate: D | null;
-
-  @Input() twelvehour: boolean = false;
-
-  @Input() timeInterval: number = 1;
-
-  /** A function used to filter which dates are selectable. */
-  @Input() dateFilter: (date: D, type: MatDatetimepickerFilterType) => boolean;
-
-  @Input() ariaLabel = "Use arrow keys to navigate";
-  @Input() ariaNextMonthLabel = "Next month";
-  @Input() ariaPrevMonthLabel = "Previous month";
-  @Input() ariaNextYearLabel = "Next year";
-  @Input() ariaPrevYearLabel = "Previous year";
-
-  /** Emits when the currently selected date changes. */
-  @Output() selectedChange: EventEmitter<D> = new EventEmitter<D>();
-
-  /** Emits when the view has been changed. **/
-  @Output() viewChanged: EventEmitter<MatCalendarView> = new EventEmitter<MatCalendarView>();
-
-  /** Date filter for the month and year views. */
-  _dateFilterForViews = (date: D) => {
-    return !!date &&
-      (!this.dateFilter || this.dateFilter(date, MatDatetimepickerFilterType.DATE)) &&
-      (!this.minDate || this._adapter.compareDate(date, this.minDate) >= 0) &&
-      (!this.maxDate || this._adapter.compareDate(date, this.maxDate) <= 0);
   }
 
   /**
@@ -166,25 +157,17 @@ export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy
     }
   }
 
-  private _clampedActiveDate: D;
-
-  _AMPM: string;
-
-  _userSelected(): void {
-    this._userSelection.emit();
-  }
-
   /** Whether the calendar is in month view. */
   _currentView: MatCalendarView;
-  set currentView(view: MatCalendarView) {
-    this._currentView = view;
-    this.viewChanged.emit(view);
-  }
+
   get currentView(): MatCalendarView {
     return this._currentView;
   }
 
-  _clockView: MatClockView = "hour";
+  set currentView(view: MatCalendarView) {
+    this._currentView = view;
+    this.viewChanged.emit(view);
+  }
 
   /** The label for the current calendar view. */
   get _yearLabel(): string {
@@ -242,23 +225,16 @@ export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy
     }
   }
 
-  _calendarState: string;
+  /** Date filter for the month and year views. */
+  _dateFilterForViews = (date: D) => {
+    return !!date &&
+      (!this.dateFilter || this.dateFilter(date, MatDatetimepickerFilterType.DATE)) &&
+      (!this.minDate || this._adapter.compareDate(date, this.minDate) >= 0) &&
+      (!this.maxDate || this._adapter.compareDate(date, this.maxDate) <= 0);
+  };
 
-  constructor(private _elementRef: ElementRef,
-              private _intl: MatDatepickerIntl,
-              private _ngZone: NgZone,
-              @Optional() private _adapter: DatetimeAdapter<D>,
-              @Optional() @Inject(MAT_DATETIME_FORMATS) private _dateFormats: MatDatetimeFormats,
-              changeDetectorRef: ChangeDetectorRef) {
-    if (!this._adapter) {
-      throw createMissingDateImplError("DatetimeAdapter");
-    }
-
-    if (!this._dateFormats) {
-      throw createMissingDateImplError("MAT_DATETIME_FORMATS");
-    }
-
-    this._intlChanges = _intl.changes.subscribe(() => changeDetectorRef.markForCheck());
+  _userSelected(): void {
+    this._userSelection.emit();
   }
 
   ngAfterContentInit() {
@@ -422,6 +398,10 @@ export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy
     });
   }
 
+  _calendarStateDone() {
+    this._calendarState = "";
+  }
+
   /** Whether the two dates represent the same view in the current view mode (month or year). */
   private _isSameView(date1: D, date2: D): boolean {
     return this.currentView === "month" ?
@@ -577,10 +557,6 @@ export class MatDatetimepickerCalendar<D> implements AfterContentInit, OnDestroy
 
   private calendarState(direction: string): void {
     this._calendarState = direction;
-  }
-
-  _calendarStateDone() {
-    this._calendarState = "";
   }
 
   private _2digit(n: number) {
